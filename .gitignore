@@ -1,0 +1,8 @@
+# bear & clangd
+.cache/
+compile_commands.json
+
+# build outputs
+build/
+*.elf
+*.wps
