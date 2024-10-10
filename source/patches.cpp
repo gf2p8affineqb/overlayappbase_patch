@@ -25,9 +25,7 @@
 #include <coreinit/filesystem.h>
 #include <coreinit/memorymap.h>
 
-#include <algorithm>
 #include <cstring>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,33 +33,32 @@
 
 namespace patches {
 
-std::optional<std::vector<OSDynLoad_NotifyData>> rpl_info;
+OSDynLoad_NotifyData men_rpx;
+OSDynLoad_NotifyData hbm_rpx;
 
-std::optional<std::vector<OSDynLoad_NotifyData>> get_rpl_info() {
+bool get_rpl_info(std::vector<OSDynLoad_NotifyData> &rpls) {
   int num_rpls = OSDynLoad_GetNumberOfRPLs();
-  if (num_rpls == 0)
-    return std::nullopt;
+  if (num_rpls == 0) {
+    wups::logger::printf("get_rpl_info: there is no RPL running\n");
+    return false;
+  }
 
   wups::logger::printf("get_rpl_info: %d RPL(s) running\n", num_rpls);
 
-  std::vector<OSDynLoad_NotifyData> rpls;
   rpls.resize(num_rpls);
 
   bool ret = OSDynLoad_GetRPLInfo(0, num_rpls, rpls.data());
-  if (!ret)
-    return std::nullopt;
-
-  return rpls;
+  return ret;
 }
 
 bool patch_instruction(void *instr, uint32_t original, uint32_t replacement) {
   uint32_t current = *(uint32_t *)instr;
 
-  wups::logger::printf("patch_instruction: writing to %08X (%08X) with %08X\n",
-                       (uint32_t)instr, current, replacement);
-
   if (current != original)
     return current == replacement;
+
+  wups::logger::printf("patch_instruction: writing to %08X (%08X) with %08X\n",
+                       (uint32_t)instr, current, replacement);
 
   KernelCopyData(OSEffectiveToPhysical((uint32_t)instr),
                  OSEffectiveToPhysical((uint32_t)&replacement),
@@ -88,48 +85,45 @@ bool patch_dynload_instructions() {
   return true;
 }
 
-std::optional<OSDynLoad_NotifyData>
-find_rpl(const std::vector<OSDynLoad_NotifyData> &rpls,
-         const std::string &name) {
+bool find_rpl(OSDynLoad_NotifyData &found_rpl, const std::string &name) {
   if (!patch_dynload_instructions()) {
     wups::logger::printf("find_rpl: failed to patch dynload functions\n");
-    return std::nullopt;
+    return false;
   }
 
-  rpl_info = get_rpl_info();
-  if (!rpl_info) {
+  std::vector<OSDynLoad_NotifyData> rpl_info;
+  if (!get_rpl_info(rpl_info)) {
     wups::logger::printf("find_rpl: failed to get rpl info\n");
-    return std::nullopt;
+    return false;
   }
 
-  auto res = std::find_if(rpls.cbegin(), rpls.cend(),
-                          [&](const OSDynLoad_NotifyData &data) {
-                            return std::string(data.name).ends_with(name);
-                          });
-  if (res == rpls.cend())
-    return std::nullopt;
+  for (const auto &rpl : rpl_info) {
+    if (std::string_view(rpl.name).ends_with(name)) {
+      found_rpl = rpl;
+      return true;
+    }
+  }
 
-  return *res;
+  return false;
 }
 
 void perform_men_patches() {
   wups::logger::initialize("overlayappbase_patch");
 
-  auto men_rpx = find_rpl(*rpl_info, "men.rpx");
-  if (!men_rpx) {
+  if (!find_rpl(men_rpx, "men.rpx")) {
     wups::logger::printf("perform_men_patches: couldnt find men.rpx\n");
     return;
   }
 
   if (cfg::patch_men) {
-    patch_instruction((uint8_t *)men_rpx->textAddr + 0x1e0b10, 0x5403d97e,
+    patch_instruction((uint8_t *)men_rpx.textAddr + 0x1e0b10, 0x5403d97e,
                       0x38600001); // v277
-    patch_instruction((uint8_t *)men_rpx->textAddr + 0x1e0a20, 0x5403d97e,
+    patch_instruction((uint8_t *)men_rpx.textAddr + 0x1e0a20, 0x5403d97e,
                       0x38600001); // v257
   } else {
-    patch_instruction((uint8_t *)men_rpx->textAddr + 0x1e0b10, 0x38600001,
+    patch_instruction((uint8_t *)men_rpx.textAddr + 0x1e0b10, 0x38600001,
                       0x5403d97e); // v277
-    patch_instruction((uint8_t *)men_rpx->textAddr + 0x1e0a20, 0x38600001,
+    patch_instruction((uint8_t *)men_rpx.textAddr + 0x1e0a20, 0x38600001,
                       0x5403d97e); // v257
   }
 
@@ -141,17 +135,16 @@ DECL_FUNCTION(int, FSOpenFile, FSClient *pClient, FSCmdBlock *pCmd,
   if (strcmp("/vol/content/Common/Package/Hbm2-2.pack", path) == 0) {
     wups::logger::initialize("overlayappbase_patch");
 
-    auto hbm_rpx = find_rpl(*rpl_info, "hbm.rpx");
-    if (hbm_rpx) {
+    if (find_rpl(hbm_rpx, "hbm.rpx")) {
       if (cfg::patch_hbm) {
-        patch_instruction((uint8_t *)hbm_rpx->textAddr + 0x0ec430, 0x5403d97e,
+        patch_instruction((uint8_t *)hbm_rpx.textAddr + 0x0ec430, 0x5403d97e,
                           0x38600001); // v197
-        patch_instruction((uint8_t *)hbm_rpx->textAddr + 0x0ec434, 0x7c606110,
+        patch_instruction((uint8_t *)hbm_rpx.textAddr + 0x0ec434, 0x7c606110,
                           0x38600001); // v180
       } else {
-        patch_instruction((uint8_t *)hbm_rpx->textAddr + 0x0ec430, 0x38600001,
+        patch_instruction((uint8_t *)hbm_rpx.textAddr + 0x0ec430, 0x38600001,
                           0x5403d97e); // v197
-        patch_instruction((uint8_t *)hbm_rpx->textAddr + 0x0ec434, 0x38600001,
+        patch_instruction((uint8_t *)hbm_rpx.textAddr + 0x0ec434, 0x38600001,
                           0x7c606110); // v180
       }
     } else {
