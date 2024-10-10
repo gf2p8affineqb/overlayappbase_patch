@@ -50,22 +50,19 @@ wups::config::category make_config_screen() {
 }
 
 void menu_open(wups::config::category &root) {
-  wups::logger::initialize("overlayappbase_patch");
-
   cfg::reload();
 
   root.add(make_config_screen());
 }
 
-void menu_close() {
-  cfg::save();
-
-  wups::logger::finalize();
+void menu_close() { 
+  cfg::save(); 
 }
 
 void init() {
   try {
     wups::config::init("overlayappbase_patch", menu_open, menu_close);
+
     cfg::load();
   } catch (std::exception &e) {
     wups::logger::printf("Init error: %s\n", e.what());

@@ -38,12 +38,12 @@ OSDynLoad_NotifyData hbm_rpx;
 
 bool get_rpl_info(std::vector<OSDynLoad_NotifyData> &rpls) {
   int num_rpls = OSDynLoad_GetNumberOfRPLs();
-  if (num_rpls == 0) {
-    wups::logger::printf("get_rpl_info: there is no RPL running\n");
-    return false;
-  }
 
   wups::logger::printf("get_rpl_info: %d RPL(s) running\n", num_rpls);
+
+  if (num_rpls == 0) {
+    return false;
+  }
 
   rpls.resize(num_rpls);
 
@@ -108,8 +108,6 @@ bool find_rpl(OSDynLoad_NotifyData &found_rpl, const std::string &name) {
 }
 
 void perform_men_patches() {
-  wups::logger::initialize("overlayappbase_patch");
-
   if (!find_rpl(men_rpx, "men.rpx")) {
     wups::logger::printf("perform_men_patches: couldnt find men.rpx\n");
     return;
@@ -126,15 +124,11 @@ void perform_men_patches() {
     patch_instruction((uint8_t *)men_rpx.textAddr + 0x1e0a20, 0x38600001,
                       0x5403d97e); // v257
   }
-
-  wups::logger::finalize();
 }
 
 DECL_FUNCTION(int, FSOpenFile, FSClient *pClient, FSCmdBlock *pCmd,
               const char *path, const char *mode, int *handle, int error) {
   if (strcmp("/vol/content/Common/Package/Hbm2-2.pack", path) == 0) {
-    wups::logger::initialize("overlayappbase_patch");
-
     if (find_rpl(hbm_rpx, "hbm.rpx")) {
       if (cfg::patch_hbm) {
         patch_instruction((uint8_t *)hbm_rpx.textAddr + 0x0ec430, 0x5403d97e,
@@ -150,8 +144,6 @@ DECL_FUNCTION(int, FSOpenFile, FSClient *pClient, FSCmdBlock *pCmd,
     } else {
       wups::logger::printf("FSOpenFile: couldnt find hbm.rpx\n");
     }
-
-    wups::logger::finalize();
   }
   int result = real_FSOpenFile(pClient, pCmd, path, mode, handle, error);
   return result;
