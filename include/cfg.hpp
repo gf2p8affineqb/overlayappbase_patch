@@ -12,14 +12,14 @@
 
 namespace cfg {
 
-extern bool patch_men;
-extern bool patch_hbm;
+    extern bool patch_men;
+    extern bool patch_hbm;
 
-void init();
+    void init();
 
-void load();
-void reload();
-void save();
+    void load();
+    void reload();
+    void save();
 
 } // namespace cfg
 

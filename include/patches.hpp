@@ -19,7 +19,7 @@
 
 namespace patches {
 
-void perform_men_patches();
+    void perform_men_patches();
 
 } // namespace patches
 
