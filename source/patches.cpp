@@ -96,7 +96,7 @@ namespace patches {
                         OSDynLoad_NotifyReason reason, OSDynLoad_NotifyData *rpl) {
         if (reason != OS_DYNLOAD_NOTIFY_LOADED)
             return;
-        if (!rpl->name || std::string_view(rpl->name).ends_with("nn_olv.rpl"))
+        if (!rpl->name || !std::string_view(rpl->name).ends_with("nn_olv.rpl"))
             return;
 
         replace(rpl->dataAddr, rpl->dataSize, original_url,
