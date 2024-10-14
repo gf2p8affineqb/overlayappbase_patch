@@ -33,23 +33,12 @@
 
 namespace patches {
 
+    FSStat mStat;
+    FSMountSource mSource;
+    char mPath[128] = "";
+
     OSDynLoad_NotifyData men_rpx;
     OSDynLoad_NotifyData hbm_rpx;
-
-    bool get_rpl_info(std::vector<OSDynLoad_NotifyData> &rpls) {
-        int num_rpls = OSDynLoad_GetNumberOfRPLs();
-
-        wups::logger::printf("get_rpl_info: %d RPL(s) running\n", num_rpls);
-
-        if (num_rpls == 0) {
-            return false;
-        }
-
-        rpls.resize(num_rpls);
-
-        bool ret = OSDynLoad_GetRPLInfo(0, num_rpls, rpls.data());
-        return ret;
-    }
 
     bool patch_instruction(void *instr, uint32_t original, uint32_t replacement) {
         uint32_t current = *(uint32_t *) instr;
@@ -84,6 +73,21 @@ namespace patches {
             return false;
 
         return true;
+    }
+
+    bool get_rpl_info(std::vector<OSDynLoad_NotifyData> &rpls) {
+        int num_rpls = OSDynLoad_GetNumberOfRPLs();
+
+        wups::logger::printf("get_rpl_info: %d RPL(s) running\n", num_rpls);
+
+        if (num_rpls == 0) {
+            return false;
+        }
+
+        rpls.resize(num_rpls);
+
+        bool ret = OSDynLoad_GetRPLInfo(0, num_rpls, rpls.data());
+        return ret;
     }
 
     bool find_rpl(OSDynLoad_NotifyData &found_rpl, const std::string &name) {
@@ -127,8 +131,8 @@ namespace patches {
         }
     }
 
-    DECL_FUNCTION(int, FSOpenFile, FSClient *pClient, FSCmdBlock *pCmd,
-                  const char *path, const char *mode, int *handle, int error) {
+    DECL_FUNCTION(int, FSOpenFile, FSClient *fsClient, FSCmdBlock *fsCmdBlock,
+                  const char *path, const char *mode, FSFileHandle *fsFileHandle, FSErrorFlag fsErrorFlag) {
         if (strcmp("/vol/content/Common/Package/Hbm2-2.pack", path) == 0) {
             if (find_rpl(hbm_rpx, "hbm.rpx")) {
                 if (cfg::patch_hbm) {
@@ -149,9 +153,18 @@ namespace patches {
             } else {
                 wups::logger::printf("FSOpenFile: couldnt find hbm.rpx\n");
             }
+
+            if (cfg::theme_hbm) {
+                const char *hbm2_2 = "/vol/external01/wiiu/hbm/Hbm2-2.pack";
+                if (FSGetMountSource(fsClient, fsCmdBlock, FS_MOUNT_SOURCE_SD, &mSource, FS_ERROR_FLAG_ALL) == FS_STATUS_OK) {
+                    if (FSMount(fsClient, fsCmdBlock, &mSource, mPath, sizeof(mPath), FS_ERROR_FLAG_ALL) == FS_STATUS_OK) {
+                        if (FSGetStat(fsClient, fsCmdBlock, hbm2_2, &mStat, fsErrorFlag) == FS_STATUS_OK)
+                            return real_FSOpenFile(fsClient, fsCmdBlock, hbm2_2, mode, fsFileHandle, fsErrorFlag);
+                    }
+                }
+            }
         }
-        int result = real_FSOpenFile(pClient, pCmd, path, mode, handle, error);
-        return result;
+        return real_FSOpenFile(fsClient, fsCmdBlock, path, mode, fsFileHandle, fsErrorFlag);
     }
     WUPS_MUST_REPLACE_FOR_PROCESS(FSOpenFile, WUPS_LOADER_LIBRARY_COREINIT,
                                   FSOpenFile, WUPS_FP_TARGET_PROCESS_ALL);

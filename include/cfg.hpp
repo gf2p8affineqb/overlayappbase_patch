@@ -14,6 +14,7 @@ namespace cfg {
 
     extern bool patch_men;
     extern bool patch_hbm;
+    extern bool theme_hbm;
 
     void init();
 

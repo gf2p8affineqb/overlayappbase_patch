@@ -20,20 +20,24 @@ namespace cfg {
     namespace keys {
         const char *patch_men = "patch_men";
         const char *patch_hbm = "patch_hbm";
+        const char *theme_hbm = "theme_hbm";
     } // namespace keys
 
     namespace labels {
         const char *patch_men = "Patch Wii U Menu";
         const char *patch_hbm = "Patch HOME Menu";
+        const char *theme_hbm = "Theme HOME Menu";
     } // namespace labels
 
     namespace defaults {
         const bool patch_men = true;
         const bool patch_hbm = true;
+        const bool theme_hbm = true;
     } // namespace defaults
 
     bool patch_men = defaults::patch_men;
     bool patch_hbm = defaults::patch_hbm;
+    bool theme_hbm = defaults::theme_hbm;
 
     wups::config::category make_config_screen() {
         wups::config::category cat{"Configuration"};
@@ -44,6 +48,10 @@ namespace cfg {
 
         cat.add(wups::config::bool_item::create(
                 cfg::labels::patch_hbm, cfg::patch_hbm, cfg::defaults::patch_hbm,
+                "true", "false"));
+
+        cat.add(wups::config::bool_item::create(
+                cfg::labels::theme_hbm, cfg::theme_hbm, cfg::defaults::theme_hbm,
                 "true", "false"));
 
         return cat;
@@ -72,6 +80,7 @@ namespace cfg {
 #define LOAD(x) wups::storage::load_or_init(keys::x, x, defaults::x)
             LOAD(patch_men);
             LOAD(patch_hbm);
+            LOAD(theme_hbm);
 #undef LOAD
         } catch (std::exception &e) {
             wups::logger::printf("Error loading config: %s\n", e.what());
@@ -92,6 +101,7 @@ namespace cfg {
 #define STORE(x) wups::storage::store(keys::x, x)
             STORE(patch_men);
             STORE(patch_hbm);
+            STORE(theme_hbm);
 #undef STORE
             wups::storage::save();
         } catch (std::exception &e) {
