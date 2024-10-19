@@ -39,7 +39,7 @@ namespace patches {
     const char original_discovery_url[] = "discovery.olv.nintendo.net/v1/endpoint";
     const char new_discovery_url[]      = "discovery.olv.pretendo.cc/v1/endpoint";
 
-    const char root_rpx_check[] = "fs:/vol/external01/wiiu/payload.elf";
+    const char root_rpx_check[] = "/vol/external01/wiiu/payload.elf";
 
     OSDynLoad_NotifyData men_rpx;
     OSDynLoad_NotifyData hbm_rpx;
@@ -113,6 +113,7 @@ namespace patches {
         rpls.resize(num_rpls);
 
         bool ret = OSDynLoad_GetRPLInfo(0, num_rpls, rpls.data());
+
         return ret;
     }
 
@@ -128,9 +129,15 @@ namespace patches {
             return false;
         }
 
+        wups::logger::printf("find_rpl: got rpl info\n");
+
         for (const auto &rpl : rpl_info) {
+            if (rpl.name == nullptr || rpl.name[0] == '\0') {
+                continue;
+            }
             if (std::string_view(rpl.name).ends_with(name)) {
                 found_rpl = rpl;
+                wups::logger::printf("find_rpl: found rpl %s\n", name.c_str());
                 return true;
             }
         }
@@ -138,7 +145,7 @@ namespace patches {
         return false;
     }
 
-    void perform_men_patches() {
+    void perform_men_patches(bool enable) {
         if (!find_rpl(men_rpx, "men.rpx")) {
             wups::logger::printf("perform_men_patches: couldnt find men.rpx\n");
             return;
@@ -149,41 +156,61 @@ namespace patches {
             return;
         }
 
-        patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0b10, 0x5403d97e,
-                          0x38600001); // v277
-        patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0a20, 0x5403d97e,
-                          0x38600001); // v257
+        if (enable) {
+            wups::logger::printf("perform_men_patches: enabling tvii patches\n");
+            patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0b10, 0x5403d97e,
+                              0x38600001); // v277
+            patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0a20, 0x5403d97e,
+                              0x38600001); // v257
+        } else {
+            wups::logger::printf("perform_men_patches: disabling tvii patches\n");
+            patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0b10, 0x38600001,
+                              0x5403d97e); // v277
+            patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0a20, 0x38600001,
+                              0x5403d97e); // v257
+        }
+    }
+
+    void perform_hbm_patches(bool enable) {
+        if (!find_rpl(hbm_rpx, "hbm.rpx")) {
+            wups::logger::printf("perform_hbm_patches: couldnt find hbm.rpx\n");
+            return;
+        }
+
+        if (enable) {
+            wups::logger::printf("perform_hbm_patches: enabling tvii patches\n");
+            patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec430, 0x5403d97e,
+                              0x38600001); // v197
+            patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec434, 0x7c606110,
+                              0x38600001); // v180
+        } else {
+            wups::logger::printf("perform_hbm_patches: disabling tvii patches\n");
+            patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec430, 0x38600001,
+                              0x5403d97e); // v197
+            patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec434, 0x38600001,
+                              0x7c606110); // v180
+        }
     }
 
     void osdynload_notify_callback(OSDynLoad_Module module, void *ctx,
                                    OSDynLoad_NotifyReason reason, OSDynLoad_NotifyData *rpl) {
-        if (reason != OS_DYNLOAD_NOTIFY_LOADED)
-            return;
-        if (!rpl->name || !std::string_view(rpl->name).ends_with("nn_olv.rpl"))
-            return;
+        if (reason == OS_DYNLOAD_NOTIFY_LOADED) {
+            if (!rpl->name)
+                return;
+            if (!std::string_view(rpl->name).ends_with("nn_olv.rpl"))
+                return;
 
-        replace_mem(rpl->dataAddr, rpl->dataSize, original_discovery_url,
-                    sizeof(original_discovery_url), new_discovery_url, sizeof(new_discovery_url));
+            replace_mem(rpl->dataAddr, rpl->dataSize, original_discovery_url,
+                        sizeof(original_discovery_url), new_discovery_url, sizeof(new_discovery_url));
+        } else if (reason == OS_DYNLOAD_NOTIFY_UNLOADED) {
+            // wip - detect when Vino.rpx gets unloaded?
+        }
     }
 
     DECL_FUNCTION(int, FSOpenFile, FSClient *pClient, FSCmdBlock *pCmd,
                   const char *path, const char *mode, int *handle, int error) {
         if (strcmp("/vol/content/Common/Package/Hbm2-2.pack", path) == 0) {
-            if (find_rpl(hbm_rpx, "hbm.rpx")) {
-                if (cfg::patch_hbm) {
-                    patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec430, 0x5403d97e,
-                                      0x38600001); // v197
-                    patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec434, 0x7c606110,
-                                      0x38600001); // v180
-                } else {
-                    patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec430, 0x38600001,
-                                      0x5403d97e); // v197
-                    patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec434, 0x38600001,
-                                      0x7c606110); // v180
-                }
-            } else {
-                wups::logger::printf("FSOpenFile: couldnt find hbm.rpx\n");
-            }
+            perform_hbm_patches(cfg::patch_hbm);
         }
 
         if (strcmp("/vol/content/vino_config.txt", path) == 0) {

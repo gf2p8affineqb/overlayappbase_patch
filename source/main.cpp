@@ -27,6 +27,8 @@ INITIALIZE_PLUGIN() {
 }
 
 DEINITIALIZE_PLUGIN() {
+    patches::perform_hbm_patches(false);
+
     wups::logger::printf("DEINITIALIZE_PLUGIN\n");
 
     wups::logger::finalize();
@@ -34,11 +36,18 @@ DEINITIALIZE_PLUGIN() {
 
 ON_APPLICATION_START() {
     auto title = OSGetTitleID();
-
-    wups::logger::printf("ON_APPLICATION_START: got title %16llX\n", title);
     if (cfg::patch_men) {
         if (title == 0x5001010040000 || title == 0x5001010040100 || title == 0x5001010040200) {
-            patches::perform_men_patches();
+            wups::logger::printf("ON_APPLICATION_START: performing men patches");
+            patches::perform_men_patches(true);
         }
+    }
+}
+
+ON_APPLICATION_ENDS() {
+    auto title = OSGetTitleID();
+    if (title == 0x5001010040000 || title == 0x5001010040100 || title == 0x5001010040200) {
+        wups::logger::printf("ON_APPLICATION_ENDS: reverting men patches");
+        patches::perform_men_patches(false);
     }
 }
