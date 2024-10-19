@@ -36,25 +36,34 @@
 
 namespace patches {
 
-    const char original_url[] = "discovery.olv.nintendo.net/v1/endpoint";
-    const char new_url[]      = "discovery.olv.pretendo.cc/v1/endpoint";
+    const char original_discovery_url[] = "discovery.olv.nintendo.net/v1/endpoint";
+    const char new_discovery_url[]      = "discovery.olv.pretendo.cc/v1/endpoint";
+
+    const char root_rpx_check[] = "fs:/vol/external01/wiiu/payload.elf";
 
     OSDynLoad_NotifyData men_rpx;
     OSDynLoad_NotifyData hbm_rpx;
 
-    bool replace(uint32_t start, uint32_t size, const char *original_val,
-                 size_t original_val_sz, const char *new_val, size_t new_val_sz) {
+    uint32_t find_mem(uint32_t start, uint32_t size, const char *original_val,
+                      size_t original_val_sz) {
         for (uint32_t addr = start; addr < start + size - original_val_sz; addr++) {
-            int ret = memcmp(original_val, (void *) addr, original_val_sz);
-            if (ret == 0) {
-                wups::logger::printf("replace: writing to %08X (%s) with %s\n", addr,
-                                     original_val, new_val);
-                KernelCopyData(OSEffectiveToPhysical(addr),
-                               OSEffectiveToPhysical((uint32_t) new_val), new_val_sz);
-                return true;
+            if (memcmp(original_val, (void *) addr, original_val_sz) == 0) {
+                return addr;
             }
         }
+        return 0;
+    }
 
+    bool replace_mem(uint32_t start, uint32_t size, const char *original_val,
+                     size_t original_val_sz, const char *new_val, size_t new_val_sz) {
+        uint32_t addr = find_mem(start, size, original_val, original_val_sz);
+        if (addr) {
+            wups::logger::printf("replace: writing to %08X (%s) with %s\n", addr,
+                                 original_val, new_val);
+            KernelCopyData(OSEffectiveToPhysical(addr),
+                           OSEffectiveToPhysical((uint32_t) new_val), new_val_sz);
+            return true;
+        }
         return false;
     }
 
@@ -90,17 +99,6 @@ namespace patches {
             return false;
 
         return true;
-    }
-
-    void new_rpl_loaded(OSDynLoad_Module module, void *ctx,
-                        OSDynLoad_NotifyReason reason, OSDynLoad_NotifyData *rpl) {
-        if (reason != OS_DYNLOAD_NOTIFY_LOADED)
-            return;
-        if (!rpl->name || !std::string_view(rpl->name).ends_with("nn_olv.rpl"))
-            return;
-
-        replace(rpl->dataAddr, rpl->dataSize, original_url,
-                sizeof(original_url), new_url, sizeof(new_url));
     }
 
     bool get_rpl_info(std::vector<OSDynLoad_NotifyData> &rpls) {
@@ -146,17 +144,26 @@ namespace patches {
             return;
         }
 
-        if (cfg::patch_men) {
-            patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0b10, 0x5403d97e,
-                              0x38600001); // v277
-            patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0a20, 0x5403d97e,
-                              0x38600001); // v257
-        } else {
-            patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0b10, 0x38600001,
-                              0x5403d97e); // v277
-            patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0a20, 0x38600001,
-                              0x5403d97e); // v257
+        if (find_mem(men_rpx.dataAddr, men_rpx.dataSize, root_rpx_check, sizeof(root_rpx_check))) {
+            wups::logger::printf("perform_men_patches: men.rpx has been replaced by root.rpx, skipping patches ...\n");
+            return;
         }
+
+        patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0b10, 0x5403d97e,
+                          0x38600001); // v277
+        patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0a20, 0x5403d97e,
+                          0x38600001); // v257
+    }
+
+    void osdynload_notify_callback(OSDynLoad_Module module, void *ctx,
+                                   OSDynLoad_NotifyReason reason, OSDynLoad_NotifyData *rpl) {
+        if (reason != OS_DYNLOAD_NOTIFY_LOADED)
+            return;
+        if (!rpl->name || !std::string_view(rpl->name).ends_with("nn_olv.rpl"))
+            return;
+
+        replace_mem(rpl->dataAddr, rpl->dataSize, original_discovery_url,
+                    sizeof(original_discovery_url), new_discovery_url, sizeof(new_discovery_url));
     }
 
     DECL_FUNCTION(int, FSOpenFile, FSClient *pClient, FSCmdBlock *pCmd,
@@ -180,7 +187,7 @@ namespace patches {
         }
 
         if (strcmp("/vol/content/vino_config.txt", path) == 0) {
-            OSDynLoad_AddNotifyCallback(&new_rpl_loaded, nullptr);
+            OSDynLoad_AddNotifyCallback(&osdynload_notify_callback, nullptr);
         }
 
         int result = real_FSOpenFile(pClient, pCmd, path, mode, handle, error);
