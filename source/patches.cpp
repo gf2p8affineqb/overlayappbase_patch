@@ -1,17 +1,19 @@
-/*  Copyright 2022 Pretendo Network contributors <pretendo.network>
-        Copyright 2022 Ash Logan <ash@heyquark.com>
+/*  Copyright 2023 Pretendo Network contributors <pretendo.network>
+    Copyright 2023 Ash Logan <ash@heyquark.com>
+    Copyright 2019 Maschell
 
-        Permission to use, copy, modify, and/or distribute this software for any
-   purpose with or without fee is hereby granted, provided that the above
-   copyright notice and this permission notice appear in all copies.
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
 
-        THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-   WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-   MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-   SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
-   RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
-   CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-   CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include <wups.h>
@@ -21,6 +23,7 @@
 #include <kernel/kernel.h>
 
 #include <coreinit/cache.h>
+#include <coreinit/debug.h>
 #include <coreinit/dynload.h>
 #include <coreinit/filesystem.h>
 #include <coreinit/memorymap.h>
@@ -33,22 +36,19 @@
 
 namespace patches {
 
+    const char root_rpx_check[] = "/vol/external01/wiiu/payload.elf";
+
     OSDynLoad_NotifyData men_rpx;
     OSDynLoad_NotifyData hbm_rpx;
 
-    bool get_rpl_info(std::vector<OSDynLoad_NotifyData> &rpls) {
-        int num_rpls = OSDynLoad_GetNumberOfRPLs();
-
-        wups::logger::printf("get_rpl_info: %d RPL(s) running\n", num_rpls);
-
-        if (num_rpls == 0) {
-            return false;
+    uint32_t find_mem(uint32_t start, uint32_t size, const char *original_val,
+                      size_t original_val_sz) {
+        for (uint32_t addr = start; addr < start + size - original_val_sz; addr++) {
+            if (memcmp(original_val, (void *) addr, original_val_sz) == 0) {
+                return addr;
+            }
         }
-
-        rpls.resize(num_rpls);
-
-        bool ret = OSDynLoad_GetRPLInfo(0, num_rpls, rpls.data());
-        return ret;
+        return 0;
     }
 
     bool patch_instruction(void *instr, uint32_t original, uint32_t replacement) {
@@ -57,9 +57,8 @@ namespace patches {
         if (current != original)
             return current == replacement;
 
-        wups::logger::printf(
-                "patch_instruction: writing to %08X (%08X) with %08X\n",
-                (uint32_t) instr, current, replacement);
+        wups::logger::printf("patch_instruction: writing to %08X (%08X) with %08X\n",
+                             (uint32_t) instr, current, replacement);
 
         KernelCopyData(OSEffectiveToPhysical((uint32_t) instr),
                        OSEffectiveToPhysical((uint32_t) &replacement),
@@ -86,6 +85,22 @@ namespace patches {
         return true;
     }
 
+    bool get_rpl_info(std::vector<OSDynLoad_NotifyData> &rpls) {
+        int num_rpls = OSDynLoad_GetNumberOfRPLs();
+
+        wups::logger::printf("get_rpl_info: %d RPL(s) running\n", num_rpls);
+
+        if (num_rpls == 0) {
+            return false;
+        }
+
+        rpls.resize(num_rpls);
+
+        bool ret = OSDynLoad_GetRPLInfo(0, num_rpls, rpls.data());
+
+        return ret;
+    }
+
     bool find_rpl(OSDynLoad_NotifyData &found_rpl, const std::string &name) {
         if (!patch_dynload_instructions()) {
             wups::logger::printf("find_rpl: failed to patch dynload functions\n");
@@ -98,9 +113,15 @@ namespace patches {
             return false;
         }
 
+        wups::logger::printf("find_rpl: got rpl info\n");
+
         for (const auto &rpl : rpl_info) {
+            if (rpl.name == nullptr || rpl.name[0] == '\0') {
+                continue;
+            }
             if (std::string_view(rpl.name).ends_with(name)) {
                 found_rpl = rpl;
+                wups::logger::printf("find_rpl: found rpl %s\n", name.c_str());
                 return true;
             }
         }
@@ -108,18 +129,25 @@ namespace patches {
         return false;
     }
 
-    void perform_men_patches() {
+    void perform_men_patches(bool enable) {
         if (!find_rpl(men_rpx, "men.rpx")) {
             wups::logger::printf("perform_men_patches: couldnt find men.rpx\n");
             return;
         }
 
-        if (cfg::patch_men) {
+        if (find_mem(men_rpx.dataAddr, men_rpx.dataSize, root_rpx_check, sizeof(root_rpx_check))) {
+            wups::logger::printf("perform_men_patches: men.rpx has been replaced by root.rpx, skipping patches ...\n");
+            return;
+        }
+
+        if (enable) {
+            wups::logger::printf("perform_men_patches: enabling tvii patches\n");
             patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0b10, 0x5403d97e,
                               0x38600001); // v277
             patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0a20, 0x5403d97e,
                               0x38600001); // v257
         } else {
+            wups::logger::printf("perform_men_patches: disabling tvii patches\n");
             patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0b10, 0x38600001,
                               0x5403d97e); // v277
             patch_instruction((uint8_t *) men_rpx.textAddr + 0x1e0a20, 0x38600001,
@@ -127,29 +155,33 @@ namespace patches {
         }
     }
 
+    void perform_hbm_patches(bool enable) {
+        if (!find_rpl(hbm_rpx, "hbm.rpx")) {
+            wups::logger::printf("perform_hbm_patches: couldnt find hbm.rpx\n");
+            return;
+        }
+
+        if (enable) {
+            wups::logger::printf("perform_hbm_patches: enabling tvii patches\n");
+            patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec430, 0x5403d97e,
+                              0x38600001); // v197
+            patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec434, 0x7c606110,
+                              0x38600001); // v180
+        } else {
+            wups::logger::printf("perform_hbm_patches: disabling tvii patches\n");
+            patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec430, 0x38600001,
+                              0x5403d97e); // v197
+            patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec434, 0x38600001,
+                              0x7c606110); // v180
+        }
+    }
+
     DECL_FUNCTION(int, FSOpenFile, FSClient *pClient, FSCmdBlock *pCmd,
                   const char *path, const char *mode, int *handle, int error) {
         if (strcmp("/vol/content/Common/Package/Hbm2-2.pack", path) == 0) {
-            if (find_rpl(hbm_rpx, "hbm.rpx")) {
-                if (cfg::patch_hbm) {
-                    patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec430,
-                                      0x5403d97e,
-                                      0x38600001); // v197
-                    patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec434,
-                                      0x7c606110,
-                                      0x38600001); // v180
-                } else {
-                    patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec430,
-                                      0x38600001,
-                                      0x5403d97e); // v197
-                    patch_instruction((uint8_t *) hbm_rpx.textAddr + 0x0ec434,
-                                      0x38600001,
-                                      0x7c606110); // v180
-                }
-            } else {
-                wups::logger::printf("FSOpenFile: couldnt find hbm.rpx\n");
-            }
+            perform_hbm_patches(cfg::patch_hbm);
         }
+
         int result = real_FSOpenFile(pClient, pCmd, path, mode, handle, error);
         return result;
     }
